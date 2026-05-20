@@ -6,6 +6,7 @@ ids_con_downsell AS (
   FROM `EIL_DP_VDWH.VFAC_APIS`
   WHERE BR_ORG = 230 
     AND BR_DOWNSELL = 2
+    AND BR_CAP_FCH >'2026-01-01'
 ),
 
 -- 2. CRUCE CON FLUJO 
