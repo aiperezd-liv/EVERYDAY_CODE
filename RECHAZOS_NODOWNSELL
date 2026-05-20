@@ -6,6 +6,7 @@ ids_sin_downsell AS (
   FROM `EIL_DP_VDWH.VFAC_APIS`
   WHERE BR_DOWNSELL = 0
   AND BR_ORG=210
+  AND BR_CAP_FCH >'2026-01-01'
 ),
 
 -- 2. CRUCE CON FLUJO 
@@ -28,6 +29,7 @@ solicitudes_nodownsell AS (
     FROM `EIL_DP_VDWH.VFAC_OMDM_FLUJO` t2
     INNER JOIN ids_sin_downsell t1
       ON t2.BR_SOLIC_CVE = t1.BR_SOLIC_CVE
+      WHERE BR_STT_CRED_CVE =3
   )
   -- FILTR PARA ULTIMO FLUJO 
   WHERE rn = 1
