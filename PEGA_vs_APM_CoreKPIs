@@ -104,16 +104,20 @@ SOLICITUDES AS (
     END AS Producto,
     CASE
       WHEN a.BR_FCH_SOLIC BETWEEN '2026-03-23' AND '2026-03-26' 
-      AND a.TDA_CVE IN ('0597','0551') THEN 'Friends & Family Tienda'
+      AND a.TDA_CVE IN ('0597','0551') 
+      THEN 'Friends & Family Tienda'
 
       WHEN a.BR_FCH_SOLIC >= '2026-03-27' 
-      AND a.TDA_CVE IN ('0597','0551') THEN 'GO-LIVE Tienda'
+      AND a.TDA_CVE IN ('0597','0551') 
+      THEN 'GO-LIVE Tienda'
 
       WHEN a.BR_FCH_SOLIC BETWEEN '2026-05-11' AND '2026-05-19' 
-      AND a.TDA_CVE IN ('0597','0551') THEN 'Friends & Family Online'
+      AND a.TDA_CVE = '0782' 
+      THEN 'Friends & Family Online'
 
       WHEN a.BR_FCH_SOLIC >= '2026-05-20' 
-      AND a.TDA_CVE IN ('0597','0551') THEN 'GO-LIVE Online'
+      AND a.TDA_CVE = '0782' 
+      THEN 'GO-LIVE Online'
 
       ELSE 'BAU '||CAST(FORMAT_DATE('%b%y', a.BR_FCH_SOLIC) AS STRING) 
     END AS Venta,----CAMBIAR A FILTROS POR FECHAS FRIENDS AND FAMILY - GO LIVE , ELIMINAR BAU 
@@ -287,6 +291,6 @@ SELECT
   SUM(CASE WHEN CTA_CVE>0 THEN LTI_ONUS ELSE 0 END) AS SUM_LTI_ONUS,
   -- SUM(CASE WHEN CTA_CVE>0 AND BR_HIT_CVE=1 THEN LTI_TOT ELSE 0 END) AS SUM_LTI_TOTAL
 FROM SOLICITUDES
-WHERE TDA_CVE IN ('0597','0551')
+WHERE TDA_CVE IN ('0597','0551','0782')
 AND VENTA IN ('Friends & Family Online','Friends & Family Tienda','GO-LIVE Online','GO-LIVE Tienda')
 GROUP BY 1,2,3,4,5,6,7
