@@ -1,9 +1,9 @@
 /***********************************************************************************************************************
-  PLANTILLA BASE: COMPARATIVA DE SALDOS Y MORAS (ESCENARIO OBSERVADO VS. ESCENARIO HIPOTÉTICO)
+  PLANTILLA BASE AJUSTADA: COMPARATIVA DE TASAS DE MORA (ESCENARIO ACTUAL VS. ESCENARIO HIPOTÉTICO)
 ***********************************************************************************************************************/
 
 ------------------------------------------------------------------------------------------------------------------------
--- MÓDULO 1: SOLICITUDES (SE REMOVIÓ EL CÁLCULO PREMATURO DE NEW_LC)
+-- MÓDULO 1: SOLICITUDES
 ------------------------------------------------------------------------------------------------------------------------
 WITH LINEAS AS (
   SELECT
@@ -16,8 +16,8 @@ WITH LINEAS AS (
       BR_NIVEL_RIESGO          -- Nivel de riesgo asignado
   FROM `crp-pro-dwh-semanticagold.EIL_DP_VMASTER.VFAC_NEGFIN_SOLICITUDES`
   WHERE DT_FCH_SOL BETWEEN '2025-03-01' AND '2025-08-31'  -- <<< RANGO TEMPORAL PARA CUENTAS CON MAS DE 6 MESES DE ANTIGUEDAD
-    AND BR_ORG = 210                                      -- <<< FILTRO DE PRODUCTO 
-    AND CTA_CVE > 0                                       -- FILTRO CUENTAS ACTIVAS 
+    AND BR_ORG = 210                                       -- <<< FILTRO DE PRODUCTO 
+    AND CTA_CVE > 0                                        -- FILTRO CUENTAS ACTIVAS 
 ),
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -50,7 +50,7 @@ MORAS AS (
   SELECT
       CTA_CVE,
       CTA_FCH_ALTA,
-      -- Ajuste solicitado: Si el comportamiento es del inicio (MOB <= 1) trae ese límite, si no, evalúa el máximo histórico de la cuenta
+      -- Si el comportamiento es del inicio (MOB <= 1) trae ese límite, si no, evalúa el máximo histórico de la cuenta
       COALESCE(
       MAX(CASE WHEN MOB <= 1 THEN CTA_IMP_LIM_CRD END), 
       MAX(CTA_IMP_LIM_CRD)) AS CTA_IMP_LIM_CRD,
@@ -213,102 +213,55 @@ NUEVAS_MORAS AS (
 ),
 
 ------------------------------------------------------------------------------------------------------------------------
--- MÓDULO 7: AGREGACIÓN POR VARIABLE DE APERTURA / SUBMUESTRA TARGET (ACTIVACIÓN DE BR_NIVEL_RIESGO)
+-- MÓDULO 7: NUEVA TABLA INTERMEDIA (CAMBIOS EN MORAS POR ESCENARIO REAL VS SIMULADO)
 ------------------------------------------------------------------------------------------------------------------------
-AGRUPADO AS (
+CAMBIOS_MORAS_PERFORMANCE AS (
   SELECT 
     BR_HIT_DES,
-    BR_NIVEL_RIESGO, -- << VARIABLE COMPLETAMENTE ACTIVADA
+    BR_NIVEL_RIESGO,
     COUNT(*) AS Solicitudes,
     SUM(CASE WHEN CTA_CVE > 0 THEN 1 ELSE 0 END) AS Cuentas,
 
-    -- NUEVAS MÉTRICAS: Líneas de crédito totales agregadas
-    AVG(CTA_IMP_LIM_CRD) AS AVG_LC_ACT, 
-    AVG(NEW_LC)          AS AVG_LC_NEW, 
+    -- Consolidación Escenario Actual (Real Observado)
+    SUM(SDO_TOT_2M)       AS TOTAL_SDO_TOT_2M_ACT,
+    SUM(SDO_ENTRY_2M)     AS TOTAL_SDO_ENTRY_2M_ACT,
+    SUM(SDO_TOT_3M)       AS TOTAL_SDO_TOT_3M_ACT,
+    SUM(SDO_30_3M)        AS TOTAL_SDO_30_3M_ACT,
+    SUM(SDO_TOT_9M)       AS TOTAL_SDO_TOT_9M_ACT,
+    SUM(SDO_90_9M)        AS TOTAL_SDO_90_9M_ACT,
 
-    -- Totales agregados de saldos por escenario y ventana temporal
-    SUM(SDO_TOT_2M_NEW)   AS SDO_TOT_2M_NEW,   SUM(SDO_TOT_2M)   AS SDO_TOT_2M_ACT,
-    SUM(SDO_ENTRY_2M_NEW) AS SDO_ENTRY_2M_NEW, SUM(SDO_ENTRY_2M) AS SDO_ENTRY_2M_ACT,
-    SUM(SUM(SDO_TOT_3M_NEW)) OVER(PARTITION BY BR_HIT_DES, BR_NIVEL_RIESGO), -- Nota: Se corrigieron los nombres de los sumatorios planos
-    SUM(SDO_TOT_3M_NEW)   AS SDO_TOT_3M_NEW,   SUM(SDO_TOT_3M)   AS SDO_TOT_3M_ACT,
-    SUM(SDO_30_3M_NEW)    AS SDO_30_3M_NEW,    SUM(SDO_30_3M)    AS SDO_30_3M_ACT,
-    SUM(SDO_TOT_6M_NEW)   AS SDO_TOT_6M_NEW,   SUM(SDO_TOT_6M)   AS SDO_TOT_6M_ACT,
-    SUM(SDO_30_6M_NEW)    AS SDO_30_6M_NEW,    SUM(SDO_30_6M)    AS SDO_30_6M_ACT,
-    SUM(SDO_TOT_9M_NEW)   AS SDO_TOT_9M_NEW,   SUM(SDO_TOT_9M)   AS SDO_TOT_9M_ACT,
-    SUM(SDO_90_9M_NEW)    AS SDO_90_9M_NEW,    SUM(SDO_90_9M)    AS SDO_90_9M_ACT
+    -- Consolidación Escenario Hipotético (Simulado)
+    SUM(SDO_TOT_2M_NEW)   AS TOTAL_SDO_TOT_2M_NEW,
+    SUM(SDO_ENTRY_2M_NEW) AS TOTAL_SDO_ENTRY_2M_NEW,
+    SUM(SDO_TOT_3M_NEW)   AS TOTAL_SDO_TOT_3M_NEW,
+    SUM(SDO_30_3M_NEW)    AS TOTAL_SDO_30_3M_NEW,
+    SUM(SDO_TOT_9M_NEW)   AS TOTAL_SDO_TOT_9M_NEW,
+    SUM(SDO_90_9M_NEW)    AS TOTAL_SDO_90_9M_NEW
   FROM NUEVAS_MORAS
   WHERE BR_HIT_DES IN ('HIT', 'THIN FILE', 'NOHIT')  
-  GROUP BY 1, 2 -- << SE AGREGA BR_NIVEL_RIESGO EN LA POSICIÓN 2 DE LA AGRUPACIÓN
+  GROUP BY 1, 2
 )
 
 ------------------------------------------------------------------------------------------------------------------------
--- OUTPUT FINAL: REPORTE CON DESGLOSE DE CRUCE Y MÉTRICAS PROMEDIO
+-- OUTPUT FINAL: REPORTE PARALELO DE RATIOS DE MORA (ACTUAL VS NUEVO)
 ------------------------------------------------------------------------------------------------------------------------
 SELECT 
   BR_HIT_DES,
-  BR_NIVEL_RIESGO, -- << VARIABLE ACTIVADA EN EL REPORTE FINAL
+  BR_NIVEL_RIESGO,
   Solicitudes,
   Cuentas,
 
-  -- METRICAS DE LÍNEAS DE CRÉDITO PROMEDIO
-  AVG_LC_ACT,
-  AVG_LC_NEW,
+  -- 1. VENTANA MOB 2M: RATIO MORA TEMPRANA 
+  SAFE_DIVIDE(TOTAL_SDO_ENTRY_2M_ACT, TOTAL_SDO_TOT_2M_ACT) AS PORC_MORA_TEMPRANA_2M_ACT, -- Real Actual
+  SAFE_DIVIDE(TOTAL_SDO_ENTRY_2M_NEW, TOTAL_SDO_TOT_2M_NEW) AS PORC_MORA_TEMPRANA_2M_NEW, -- Simulado Nuevo
 
-  -- ----------------------------------------------------
-  -- VENTANA MOB 2M TOTAL
-  -- ----------------------------------------------------
-  SDO_TOT_2M_NEW, SDO_TOT_2M_ACT,
-  (SDO_TOT_2M_NEW - SDO_TOT_2M_ACT) AS DIF_SDO_TOT_2M,
-  SAFE_DIVIDE((SDO_TOT_2M_NEW - SDO_TOT_2M_ACT), SDO_TOT_2M_ACT) AS PORC_SDO_TOT_2M,
+  -- 2. VENTANA MOB 3M: RATIO MORA 30+ 
+  SAFE_DIVIDE(TOTAL_SDO_30_3M_ACT, TOTAL_SDO_TOT_3M_ACT) AS PORC_MORA_30_PLUS_3M_ACT,      -- Real Actual
+  SAFE_DIVIDE(TOTAL_SDO_30_3M_NEW, TOTAL_SDO_TOT_3M_NEW) AS PORC_MORA_30_PLUS_3M_NEW,      -- Simulado Nuevo
 
-  -- ----------------------------------------------------
-  -- VENTANA MOB 2M ENTRY (MORA TEMPRANA)
-  -- ----------------------------------------------------
-  SDO_ENTRY_2M_NEW, SDO_ENTRY_2M_ACT,
-  (SDO_ENTRY_2M_NEW - SDO_ENTRY_2M_ACT) AS DIF_SDO_ENTRY_2M,
-  SAFE_DIVIDE((SDO_ENTRY_2M_NEW - SDO_ENTRY_2M_ACT), SDO_ENTRY_2M_ACT) AS PORC_SDO_ENTRY_2M,
+  -- 3. VENTANA MOB 9M: RATIO MORA MÁXIMA 90+ 
+  SAFE_DIVIDE(TOTAL_SDO_90_9M_ACT, TOTAL_SDO_TOT_9M_ACT) AS PORC_MORA_MAX_90_PLUS_9M_ACT,   -- Real Actual
+  SAFE_DIVIDE(TOTAL_SDO_90_9M_NEW, TOTAL_SDO_TOT_9M_NEW) AS PORC_MORA_MAX_90_PLUS_9M_NEW    -- Simulado Nuevo
 
-  -- ----------------------------------------------------
-  -- VENTANA MOB 3M TOTAL
-  -- ----------------------------------------------------
-  SDO_TOT_3M_NEW, SDO_TOT_3M_ACT,
-  (SDO_TOT_3M_NEW - SDO_TOT_3M_ACT) AS DIF_SDO_TOT_3M,
-  SAFE_DIVIDE((SDO_TOT_3M_NEW - SDO_TOT_3M_ACT), SDO_TOT_3M_ACT) AS PORC_SDO_TOT_3M,
-
-  -- ----------------------------------------------------
-  -- VENTANA MOB 3M MORA 30+
-  -- ----------------------------------------------------
-  SDO_30_3M_NEW, SDO_30_3M_ACT,
-  (SDO_30_3M_NEW - SDO_30_3M_ACT) AS DIF_SDO_30_3M,
-  SAFE_DIVIDE((SDO_30_3M_NEW - SDO_30_3M_ACT), SDO_30_3M_ACT) AS PORC_SDO_30_3M,
-
-  -- ----------------------------------------------------
-  -- VENTANA MOB 6M TOTAL
-  -- ----------------------------------------------------
-  SDO_TOT_6M_NEW, SDO_TOT_6M_ACT,
-  (SDO_TOT_6M_NEW - SDO_TOT_6M_ACT) AS DIF_SDO_TOT_6M,
-  SAFE_DIVIDE((SDO_TOT_6M_NEW - SDO_TOT_6M_ACT), SDO_TOT_6M_ACT) AS PORC_SDO_TOT_6M,
-
-  -- ----------------------------------------------------
-  -- VENTANA MOB 6M MORA 30+
-  -- ----------------------------------------------------
-  SDO_30_6M_NEW, SDO_30_6M_ACT,
-  (SDO_30_6M_NEW - SDO_30_6M_ACT) AS DIF_SDO_30_6M,
-  SAFE_DIVIDE((SDO_30_6M_NEW - SDO_30_6M_ACT), SDO_30_6M_ACT) AS PORC_SDO_30_6M,
-
-  -- ----------------------------------------------------
-  -- VENTANA MOB 9M TOTAL
-  -- ----------------------------------------------------
-  SDO_TOT_9M_NEW, SDO_TOT_9M_ACT,
-  (SDO_TOT_9M_NEW - SDO_TOT_9M_ACT) AS DIF_SDO_TOT_9M,
-  SAFE_DIVIDE((SDO_TOT_9M_NEW - SDO_TOT_9M_ACT), SDO_TOT_9M_ACT) AS PORC_SDO_TOT_9M,
-
-  -- ----------------------------------------------------
-  -- VENTANA MOB 9M MORA MÁXIMA 90+
-  -- ----------------------------------------------------
-  SDO_90_9M_NEW, SDO_90_9M_ACT,
-  (SDO_90_9M_NEW - SDO_90_9M_ACT) AS DIF_SDO_90_9M,
-  SAFE_DIVIDE((SDO_90_9M_NEW - SDO_90_9M_ACT), SDO_90_9M_ACT) AS PORC_SDO_90_9M
-
-FROM AGRUPADO
+FROM CAMBIOS_MORAS_PERFORMANCE
 ORDER BY BR_HIT_DES, BR_NIVEL_RIESGO;
