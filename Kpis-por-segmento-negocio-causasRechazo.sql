@@ -13,7 +13,7 @@ WITH SOLICITUDES_RECHAZADAS AS (
       BR_ORG, -- Variable arrastrada para el filtrado final
       CTA_CVE,
       BR_STATUS,
-      CAUSA_RECHAZO -- Solo nos quedamos con la causa principal
+      CAUSA_RECHAZO
   FROM `crp-pro-dwh-semanticagold.EIL_DP_VMASTER.VFAC_NEGFIN_SOLICITUDES`
   WHERE DT_FCH_SOL BETWEEN '2026-01-01' AND '2026-06-30' -- Acotado al primer semestre de 2026
     -- Filtro estricto para asegurar que solo analizamos el universo de rechazos
@@ -21,29 +21,36 @@ WITH SOLICITUDES_RECHAZADAS AS (
 ),
 
 ------------------------------------------------------------------------------------------------------------------------
--- MÓDULO 2: DATOS DEMOGRÁFICOS BASE (MAPEO CORREGIDO M=MASCULINO / F=FEMENINO)
+-- MÓDULO 2: DATOS DEMOGRÁFICOS BASE Y EXTRACCIÓN DE RFC (CON FILTRO DE PRIMERA SOLICITUD POR RFC)
 ------------------------------------------------------------------------------------------------------------------------
 DEMOGRAFICOS AS (
   SELECT * FROM (
     SELECT 
         BR_SOLIC_CVE,
+        BR_RFC, -- Nueva variable solicitada
         BR_EDAD,
         CASE 
           WHEN TRIM(UPPER(BR_SEXO)) IN ('FEMENINO', 'F')   THEN 'M' 
           WHEN TRIM(UPPER(BR_SEXO)) IN ('MASCULINO', 'M')  THEN 'H' 
           ELSE 'DESCONOCIDO'
-        END AS BR_GENERO
+        END AS BR_GENERO,
+        
+        -- Numeramos las solicitudes por RFC cronológicamente (de menor a mayor clave)
+        ROW_NUMBER() OVER(PARTITION BY BR_RFC ORDER BY BR_SOLIC_CVE ASC) AS rn
     FROM `crp-pro-dwh-semanticagold.EIL_DP_VDWH.VFAC_APIA`
   )
+  -- Mantenemos el filtro de género y aseguramos traer únicamente la primera solicitud por RFC
   WHERE BR_GENERO IN ('M', 'H')
+    AND rn = 1
 ),
 
 ------------------------------------------------------------------------------------------------------------------------
--- MÓDULO 3: MATRIZ DE CATÁLOGOS ASOCIADA A RECHAZOS
+-- MÓDULO 3: MATRIZ DE CATÁLOGOS ASOCIADA A RECHAZOS (JOIN POR SOLIC_CVE)
 ------------------------------------------------------------------------------------------------------------------------
 UNIVERSO_CATALOGOS AS (
   SELECT 
       s.*, -- Mantiene s.BR_ORG y s.CAUSA_RECHAZO
+      d.BR_RFC, -- Variable integrada al universo
       COALESCE(d.BR_EDAD, 0) AS BR_EDAD,
       d.BR_GENERO,
 
@@ -59,7 +66,9 @@ UNIVERSO_CATALOGOS AS (
         ELSE 'Segmento Sin Datos'
       END AS CATALOGO
   FROM SOLICITUDES_RECHAZADAS s
-  LEFT JOIN DEMOGRAFICOS d 
+  -- INNER JOIN o LEFT JOIN dependiendo de si requieres que obligatoriamente tengan RFC/Demográficos válidos.
+  -- Dado que se filtra c.CATALOGO <> 'Segmento Sin Datos' al final, un INNER JOIN es óptimo aquí.
+  INNER JOIN DEMOGRAFICOS d 
      ON s.BR_SOLIC_CVE = d.BR_SOLIC_CVE
 )
 
@@ -85,7 +94,6 @@ WHERE c.CATALOGO <> 'Segmento Sin Datos'
   -- FILTRADO ÚNICO AL FINAL POR LA VARIABLE ARRASTRADA
   -- ===================================================================================================================
   AND c.BR_ORG = 200 
-  -- and CATALOGO = 'Mamá práctica'
 GROUP BY 1, 2
 ORDER BY 
     CASE c.CATALOGO
