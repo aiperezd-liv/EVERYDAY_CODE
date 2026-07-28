@@ -112,9 +112,9 @@ LEFT JOIN COMPORTAMIENTO_CUENTAS cc
   ON c.CTA_CVE = cc.CTA_CVE
 WHERE c.CATALOGO <> 'Segmento Sin Datos'
   -- ===================================================================================================================
-  -- FILTRADO ÚNICO AL FINAL (Cambia el valor de acuerdo al origen que quieras analizar, ej: 'DIGITAL', 'TIENDA', etc.)
+  -- FILTRADO ÚNICO AL FINAL (Cambia el valor de acuerdo al producto que quieras analizar, ej: 200,210,230)
   -- ===================================================================================================================
-  -- AND c.BR_ORG = 'DIGITAL' 
+AND c.BR_ORG = 200 
 GROUP BY 1
 ORDER BY 
     CASE c.CATALOGO
